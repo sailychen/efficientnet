@@ -1,0 +1,227 @@
+令人拍案叫绝的EfficientNet和EfficientDet
+MoonSmile 我爱计算机视觉 1周前
+点击我爱计算机视觉标星，更快获取CVML新技术
+
+
+
+本文经作者MoonSmile授权转载，原文地址：
+
+https://zhuanlan.zhihu.com/p/96773680
+
+
+
+本文介绍谷歌发表于 ICML 2019的 EfficientNet 和 最近挂在arXiv上的 EfficientDet, 第一作者为同一个人，来自谷歌大脑团队，纸面上体现出来的效果是非常好的。
+
+先介绍第一篇文章—— EfficientNet
+
+论文：EfficientNet: Rethinking Model Scaling for Convolutional Neural Networks
+
+https://arxiv.org/abs/1905.11946
+
+代码：https://github.com/qubvel/efficientnet
+
+文章摘要
+卷积神经网络（ConvNets）通常是在固定的资源预算下发展起来的，如果有更多的资源可用的话，则会扩大规模以获得更好的精度，比如可以提高网络深度(depth)、网络宽度(width)和输入图像分辨率 (resolution)大小。但是通过人工去调整 depth, width, resolution 的放大或缩小的很困难的，在计算量受限时有放大哪个缩小哪个，这些都是很难去确定的，换句话说，这样的组合空间太大，人力无法穷举。基于上述背景，该论文提出了一种新的模型缩放方法，它使用一个简单而高效的复合系数来从depth, width, resolution 三个维度放大网络，不会像传统的方法那样任意缩放网络的维度，基于神经结构搜索技术可以获得最优的一组参数(复合系数)。从下图可看出，EfficientNet不仅比别的网络快很多，而且精度也更高。
+
+
+Efficientnet和其他网络对比在imagenet上的参数与精度曲线
+相关介绍
+对网络的扩展可以通过增加网络层数（depth，比如从 ResNet (He et al.)从resnet18到resnet200 ）, 也可以通过增加宽度，比如WideResNet (Zagoruyko & Komodakis, 2016)和MobileNets (Howard et al., 2017) 可以扩大网络的width (#channels), 还有就是更大的输入图像尺寸(resolution)也可以帮助提高精度。如下图所示: (a)是基本模型，（b）是增加宽度，（c）是增加深度，（d）是增大输入图像分辨率，（d）是EfficientNet，它从三个维度均扩大了，但是扩大多少，就是通过作者提出来的复合模型扩张方法结合神经结构搜索技术获得的。
+
+
+对网络从不同纬度扩大的对比
+现在我们已经知道了，作者是要从depth, width, resolution 这三个维度去缩放模型，现在来看看具体是怎么做的。
+
+复合模型扩张方法
+问题定义：我们将整个卷积网络称为 N，它的第 i 个卷积层可以表示为：
+
+ ,  代表输入张量，  代表输出张量
+
+整个卷积网络由 k 个卷积层组成，可以表示为：
+
+
+整个卷积网络N的表示
+但是在实际中，通常会将多个结构相同的卷积层称为一个 stage，例如 ResNet 有5 个 stage，每个 stage 中的卷积层结构相同(除了第一层为降采样层)，以 stage 为单位可以将卷积网络 N 表示为：
+
+
+以 stage 为单位可以将卷积网络 N 的表示
+其中，  代表第i层的输入张量的维度（为了方便叙述忽略 batch 这个维度），下标 i(从 1 到 s) 表示的是 stage 的序号， 表示第 i 个 stage ，它由卷积层  重复  次构成。
+
+与通常的ConvNet设计不同，通常的ConvNet设计主要关注寻找最佳的网络层 ，模型缩放尝试扩展网络长度（  ）、宽度（  ）和/或分辨率（  ），而不改变基线网络中预定义的  （我个人在这里的理解是指kernel size等每一个层内的参数，因为模型缩放只对depth, width, resolution进行组合调整，不对每一个层内具体的方式做改变）。
+
+所以，优化目标就是在资源有限的情况下，要最大化 Accuracy, 优化目标的公式表达如下：
+
+
+优化目标定义
+作者发现，更大的网络具有更大的宽度、深度或分辨率，往往可以获得更高的精度，但精度增益在达到80%后会迅速饱和，这表明了只对单一维度进行扩张的局限性，实验结果如下图：
+
+
+只对单一维度进行扩张的局限性
+作者指出，模型扩张的各个维度之间并不是完全独立的，比如说，对于更大的分辨率图像，应该使用更深、更宽的网络，这就意味着需要平衡各个扩张维度，而不是在单一维度扩张。
+
+如下图所示，直线上的每个点表示具有不同宽度系数（w）的模型。第一个基线网络（d=1.0，r=1.0）有18个卷积层，分辨率224x224，而最后一个基线（d=2.0，r=1.3）有36个卷积层，分辨率299x299。这个图说明了一个问题，为了追求更好的精度和效率，在ConvNet缩放过程中平衡网络宽度、深度和分辨率的所有维度是至关重要的。
+
+
+所以本文提出了复合扩张方法，这也是文章核心的地方，(  )是我们需要求解的一组参数，如下图公式，带约束的最优参数求解。(  ) 分别衡量着depth, width和 resolution的比重，其中  在约束上会有平方，是因为如果增加宽度或分辨率两倍，其计算量是增加四倍，但是增加深度两倍，其计算量只会增加两倍。
+
+
+
+
+求解方式：
+
+固定公式中的φ=1，然后通过网格搜索（grid search）得出最优的α、β、γ，得出最基本的模型EfficientNet-B0.
+
+固定α、β、γ的值，使用不同的φ，得到EfficientNet-B1, ..., EfficientNet-B7
+
+φ的大小对应着消耗资源的大小，相当于：
+
+当φ=1时，得出了一个最小的最优基础模型；
+
+增大φ时，相当于对基模型三个维度同时扩展，模型变大，性能也会提升，资源消耗也变大。
+
+对于神经网络搜索，作者使用了和 MnasNet: Platform-awareneural architecture search for mobile 一样的搜索空间和优化目标。
+
+Efficientnet网络结构：
+作者指明，由于模型缩放不会改变基线网络中的层，但是拥有一个良好的基线网络也是至关重要的。我们将使用现有的基础网络来评估我们的缩放方法，但是为了更好地证明我们的缩放方法的有效性，我们还开发了一种新的mobile-size baseline，称为 EfficientNet，EfficientNet-B0的网络结构如下 (类似于 MobileNetV2 和 MnasNet)：
+
+
+实验结果
+
+Efficientnet系列跟其他网络的对比（计算量/精度曲线）
+
+对现有的基础网络采用文章提出的方法进行模型扩张，然后跟用单一维度对该模型扩张进行对比
+
+Efficientnet系列跟其他的基础网络和方法在imagenet上的对比
+作者还在迁移学习上做了实验，表明 EfficientNet 也是有效的。
+
+下面介绍另一篇论文，在提出EfficientDet，作者接着又提出了EfficientDet
+
+论文：EfficientDet: Scalable and Efficient Object Detection
+
+https://arxiv.org/abs/1911.09070
+
+代码：https://github.com/xuannianz/EfficientDet
+
+文章摘要
+模型效率在计算机视觉中的地位越来越重要，本文系统地研究了用于目标检测的各种神经网络结构设计选择，并提出了几种提高效率的关键优化方法。首先，我们提出了一个加权的双向特征金字塔网络（BiFPN），该网络允许简单快速的多尺度特征融合；其次，我们提出了一种复合尺度扩张方法，该方法可以统一地对所有主干网、特征网络和预测网络的分辨率、深度和宽度进行缩放。基于这些优化，我们开发了一个新的对象检测器家族，称为EfficientDet。
+
+文章动机：
+１、如何高效的进行多尺度特征融合(efficient multi-scale feature fusion)：提到多尺度融合，在融合不同的输入特征时，以往的研究（FPN以及一些对FPN的改进工作）大多只是没有区别的将特征相加；然而，由于这些不同的输入特征具有不同的分辨率，我们观察到它们对融合输出特征的贡献往往是不平等的，为了解决这一问题，作者提出了一种简单而高效的加权（类似与attention）双向特征金字塔网络（BiFPN），它引入可学习的权值来学习不同输入特征的重要性，同时反复应用自顶向下和自下而上的多尺度特征融合。
+
+2、如何对模型进行扩张（参考上文 EfficientNet ，同时考虑depth、width和resolution）
+
+作者基于EfficientNet, 提出对检测器的backbone等网络进行模型缩放，并且结合提出的BiFPN提出了新的检测器家族，叫做EfficientDet。本文提出的检测器的主要遵循one-stage的设计思想，通过优化网络结构，可以达到更高的效率和精度。
+
+
+The performance comparison on COCO dataset
+BiFPN结构
+如下图所示，BiFPN在图e的基础上增加了shortcut，这些都是在现有的一些工作的基础上添砖加瓦。
+
+
+BiFPN与其他的特征融合方法的比较
+但是，以往的特征融合方法对所有输入特征一视同仁，在BiFPN中则引入了加权策略，下边介绍本文提出来的加权策略（类似attention机制）。
+
+最直白的思想，加上一个可学习的权重即可，如下：
+
+
+加权策略
+其中  可以是一个标量（对每一个特征），可以是一个向量（对每一个通道），也可以是一个多维度的tenor（对每一个像素）。但是如果不对  对限制容易导致训练不稳定，于是很自然的想到对每一个权重用softmax：
+
+
+对每一个权重用softmax
+但是计算softmax速度较慢，于是作者提出了快速的限制方法：
+
+
+快速的限制方法
+为了保证weight大于0，weight前采用relu函数。
+
+以上图BiFPN结构中第６层为例：
+
+
+在上图BiFPN结构中第６层中的加权特征融合
+EfficientDet结构
+组合了backbone（使用了EfficientNet）和BiFPN（特征网络）和Box prediction net，整个框架就是EfficientDet的基本模型，结构如下图：
+
+
+EfficientDet结构
+模型复合扩张（建议先阅读上文EfficientNet了解复合扩张）
+对于Backbone network：
+
+直接采用EfficientNet-B0 to B6中的符合系数，并采用 EfficientNet作为backbone。
+
+对于BiFPN network:
+
+
+对于BiFPN network中width和depth的设置
+对于Box/class prediction network:
+
+
+对Box/class prediction network中的depth的设置
+对于Input image resolution（文中说必须是2^7＝128的倍数）：
+
+
+对于Input image resolution的设置
+
+模型扩张复合系数表
+实验结果
+
+EfficientDet performance on COCO
+
+:Model size and inference latency comparison
+
+Comparison of different feature fusion
+
+Comparison of different scaling methods
+分解实验结果：
+
+
+比较使用不同的特征网络
+
+分离backbone和BiFPN
+总结：看着很有效，但是还得等待使用之后才知道是不是真的好用，如果真的有效，对于工业界将是很友好的。
+参考文献
+1. 速度与精度的结合 - EfficientNet 详解
+
+https://zhuanlan.zhihu.com/p/85845131
+
+
+
+2. EfficientNet: Rethinking Model Scaling for Convolutional Neural Networks
+
+https://arxiv.org/abs/1905.11946
+
+
+
+3. 2019 EfficientDet（谷歌one-stage目标检测）论文阅读笔记
+
+https://zhuanlan.zhihu.com/p/93844349
+
+
+
+4. EfficientDet: Scalable and Efficient Object Detection
+
+https://arxiv.org/abs/1911.09070
+
+
+
+目标检测交流群
+
+
+
+关注最新最前沿的2D、3D目标检测技术，扫码添加CV君拉你入群，（如已为CV君其他账号好友请直接私信）
+
+（请务必注明：目标检测）
+
+
+
+喜欢在QQ交流的童鞋，可以加52CV官方QQ群：805388940。
+
+（不会时时在线，如果没能及时通过验证还请见谅）
+
+
+
+长按关注我爱计算机视觉
+
+
+微信扫一扫
+关注该公众号
